@@ -260,13 +260,12 @@ void main(void)
          r_addr = addr_hi<<16 | addr;
          //ptr_b = &c_buff[pi];
          save_a = addr & 0xffc0;
-         pi ^= 0x40;
      }
       curr_a = addr & 0xffc0;
-      // if (save_a != curr_a ){
-      //    Nop();
-       //   pi ^= 0x40;
-      // }
+      if (save_a != curr_a ){
+         Nop();
+         pi ^= 0x40;
+       }
       // pi ^= 0x40;
      
          ptr_b = &c_buff[pi];
