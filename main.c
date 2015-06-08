@@ -68,9 +68,9 @@ unsigned int gest_tmr = 0;
 unsigned int acty_tmr = 0;
 uint8_t      uart_timeout;
 uint8_t      uart_state;
-uint8_t      c_buff[64],fa[64], u_buff[64], w_buff[16];
+uint8_t      c_buff[128],fa[64], u_buff[64], w_buff[16], r_buff[16];
 volatile uint16_t  byte_counter;
-uint8_t *buff;
+uint8_t *buff,*ptr_b;
 uint8_t g_flag;
 uint32_t flash_addr;
 
@@ -87,9 +87,9 @@ uint32_t flash_addr;
 
 void main(void)
 {
-    uint32_t r_addr, *p;
-    uint16_t addr,addr_hi;
-    uint8_t a,b,a_lo,a_hi,c,com,end_line,data, csum, *pa;
+    uint32_t r_addr;
+    uint16_t addr,addr_hi,save_a, curr_a;
+    uint8_t a,b,a_lo,a_hi,c,com,end_line,data, csum, pi;
     uint8_t num,num1,idx,idy,state,counter,com1,timeout,tx_r;
     uint8_t b_line;
     char ch;
@@ -154,6 +154,8 @@ void main(void)
     end_line = 0;
     r_addr = 0;
     addr_hi = 0;
+    pi = 0;
+    ptr_b = &c_buff[0];
     /* TODO <INSERT USER APPLICATION CODE HERE> */
 
     do {
@@ -173,6 +175,7 @@ void main(void)
      if ( state ) timeout++;
      if ( timeout > 200 ) {
          idx = 0;
+         pi = 0;
          state = 0;
          com1 = 0;
          com = 0;
@@ -237,9 +240,6 @@ void main(void)
      a_lo = a<<4 | b;
      csum += a_lo;
      addr = a_hi<<8 | a_lo;
-     if ( idx == 0 ) {
-         r_addr = addr_hi<<16 | addr;
-     } 
      //r_addr = addr_hi<<16 | addr;
      state = 7;
      break;
@@ -253,9 +253,33 @@ void main(void)
      b = getbyte( ch ); 
      com = a<<4 | b;
      csum += com;
-     if ( com == 0 ) { if( num ) state = 12;  else state = 14;  buff = &c_buff[0];}
-     else if ( com == 1 ) { if ( num) state = 12; else state = 14;  }
-     else if ( com == 4 ) { state = 12; buff = &u_buff[0]; }
+     if ( com == 0 ) {
+         if( num ) state = 12; 
+         else state = 14;
+         if ( idx == 0 ) {
+         r_addr = addr_hi<<16 | addr;
+         //ptr_b = &c_buff[pi];
+         save_a = addr & 0xffc0;
+         pi ^= 0x40;
+     }
+      curr_a = addr & 0xffc0;
+      // if (save_a != curr_a ){
+      //    Nop();
+       //   pi ^= 0x40;
+      // }
+      // pi ^= 0x40;
+     
+         ptr_b = &c_buff[pi];
+         //buff = &c_buff[0];
+         buff = ptr_b;
+     }else if ( com == 1 ) { 
+         if ( num) { state = 12;
+         buff = &r_buff[0];} 
+         else state = 14;
+     } else if ( com == 4 ) {
+         state = 12;
+         buff = &u_buff[0];
+     }
      else state = 0;
      break;
 
@@ -370,9 +394,9 @@ void main(void)
          if ( ((idx == 0) && ( com == 0 ))  ) {
              Nop();
              Nop();
-             WriteBlockFlash(r_addr,1,c_buff);
+             WriteBlockFlash(r_addr,1,ptr_b);
          } else if ( com == 4 ) {
-             WriteBlockFlash(r_addr,1,c_buff);
+             WriteBlockFlash(r_addr,1,ptr_b);
              idx = 0;
          }
          // WriteBytesFlash(r_addr, num1, c_buff); 
@@ -387,6 +411,7 @@ void main(void)
       while ( PIR1bits.TX1IF == 0 );
       Nop();
       idx = 0;
+      pi = 0;
       state = 0;
       com1 = 0;
        com = 0;
