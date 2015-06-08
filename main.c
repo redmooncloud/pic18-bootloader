@@ -91,6 +91,7 @@ void main(void)
     uint16_t addr,addr_hi;
     uint8_t a,b,a_lo,a_hi,c,com,end_line,data, csum, *pa;
     uint8_t num,num1,idx,idy,state,counter,com1,timeout,tx_r;
+    uint8_t b_line;
     char ch;
     /*p = (uint32_t *)0xC00;
     u = &init_UART;
@@ -191,7 +192,7 @@ void main(void)
      switch ( state ) {
 
      case 0:
-     if ( ch == ':' ) { state = 1; csum = 0;}
+     if ( ch == ':' ) { state = 1; b_line = 0; csum = 0;}
      else if ( ch == '#' ) { state = 9; }
      else {
          while ( PIR1bits.TX1IF == 0 );
@@ -209,6 +210,8 @@ void main(void)
      b = getbyte( ch ); 
      num = a<<4 | b; num1 = num;
      csum += num;
+     if ( num % 16 != 0 ) b_line = 1;
+     else b_line = 0; 
      state = 3;
      break;
 
@@ -304,16 +307,16 @@ void main(void)
      case 15:
      b = getbyte( ch ); 
      c = a<<4 | b;
-     if ( (0xFF - csum + 1) == c ) {
+     if ( ((0xFF - csum + 1) == c ) || ( csum == 0 )) {
          tx_r = 0x06; 
          state = 16;
          if ( com == 4 ) {
-             a = c_buff[0];
-             b = c_buff[1];
+             a = u_buff[0];
+             b = u_buff[1];
              addr_hi = a<<8 | b;
          }
      }
-     else { tx_r = 0x15;state = 16; }
+     else { tx_r = 0x15;state = 18; }
      break;
 
      case 16:
@@ -323,34 +326,27 @@ void main(void)
          end_line = 1;
          if ( com == 1)  { com1 = 1; }
      }
-     else if ( ch == 13 ) { 
-         state = 17; 
+     else  { 
+         state = 17;                     // probably ch == 13 
      }     
      break;
 
 
      case 17:
-     if (ch  ==  10){ 
-         Nop();
-         //TXREG1 = 0x06;
-     //    state = 0;
-         end_line = 1;
-         if ( com == 1) { com1 = 1; }
-     }
-     else {
-         Nop();
-         TXREG1 = 0x15;
-     }
-     state = 0;
+       Nop();
+       //TXREG1 = 0x06;
+       state = 0;
+       end_line = 1;
+       if ( com == 1) { com1 = 1; }
      break;
      
      
      case 18:
      if (ch  ==  10){ 
-         //TXREG1 = 0x15;
+         end_line = 2;
          state = 0; 
      }
-     else if ( ch == 13 ) { 
+     else  { 
          state = 19; 
      }     
      break;
@@ -358,6 +354,7 @@ void main(void)
 
      case 19:     
      //TXREG = 0x15;
+     end_line = 2;
      state = 0;
      break;
      
@@ -370,9 +367,11 @@ void main(void)
      
    //  while ( PIR1bits.TX1IF == 0 );
      if ( end_line == 1 ) {
-         if ( ((idx == 0) && ( com == 0 )) || (com == 4) ) {
+         if ( ((idx == 0) && ( com == 0 ))  ) {
              Nop();
              Nop();
+             WriteBlockFlash(r_addr,1,c_buff);
+         } else if ( com == 4 ) {
              WriteBlockFlash(r_addr,1,c_buff);
              idx = 0;
          }
@@ -387,15 +386,15 @@ void main(void)
       TXREG1 = tx_r;
       while ( PIR1bits.TX1IF == 0 );
       Nop();
-      //idx = 0;
-      //state = 0;
-      //com1 = 0;
-      // com = 0;
-      // end_line = 0;
-      // r_addr = 0;
-      // addr_hi = 0;
-     *(uint16_t *)0xE00 = 0xdead;
-      asm("reset");
+      idx = 0;
+      state = 0;
+      com1 = 0;
+       com = 0;
+       end_line = 0;
+       r_addr = 0;
+       addr_hi = 0;
+     // *(uint16_t *)0xE00 = 0xdead;
+      // asm("reset");
      }
      
     //while ( PIR1bits.TX1IF == 0 );
@@ -571,7 +570,7 @@ void ReadFlash(unsigned long startaddr, unsigned int num_bytes, unsigned char *f
 	{
 		//*********** Table read sequence ******************************
 
-		 asm("TBLRDPOSTINC");
+		asm("TBLRDPOSTINC");
 		*flash_array++ = TABLAT;
         // asm("TBLRDPOSTINC");
 	}	
