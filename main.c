@@ -73,7 +73,7 @@ volatile uint16_t  byte_counter;
 uint8_t *buff,*ptr_b;
 uint8_t g_flag;
 uint32_t flash_addr;
-
+void set_buffer( uint8_t *p);
 
 /******************************************************************************/
 /* User Global Variable Declaration                                           */
@@ -87,11 +87,11 @@ uint32_t flash_addr;
 
 void main(void)
 {
-    uint32_t r_addr;
+    uint32_t r_addr,n_addr;
     uint16_t addr,addr_hi,save_a, curr_a;
     uint8_t a,b,a_lo,a_hi,c,com,end_line,data, csum, pi;
     uint8_t num,num1,idx,idy,state,counter,com1,timeout,tx_r;
-    uint8_t b_line;
+    uint8_t b_line,fcom,i,bf;
     char ch;
     /*p = (uint32_t *)0xC00;
     u = &init_UART;
@@ -147,7 +147,8 @@ void main(void)
     /* Initialize I/O and Peripherals for application */
     // EraseFlash(0x1000,0x1f000);
     InitApp();
-    idx = 0;
+    bf = 1;
+    save_a = 0;
     state = 0;
     com1 = 0;
     com = 0;
@@ -155,7 +156,8 @@ void main(void)
     r_addr = 0;
     addr_hi = 0;
     pi = 0;
-    ptr_b = &c_buff[0];
+    buff = &c_buff[0];
+    set_buffer(buff);
     /* TODO <INSERT USER APPLICATION CODE HERE> */
 
     do {
@@ -172,9 +174,10 @@ void main(void)
      TMR1 = 0xE795;
      PIR1bits.TMR1IF = 0;
      counter++;
-     if ( state ) timeout++;
+     if ( state ) { timeout++;
      if ( timeout > 200 ) {
-         idx = 0;
+         bf = 1;
+         save_a = 0;
          pi = 0;
          state = 0;
          com1 = 0;
@@ -183,7 +186,10 @@ void main(void)
          r_addr = 0;
          addr_hi = 0;
          timeout = 0;
+         buff = &c_buff[0];
+         set_buffer(buff);
          
+     }
      }
      if ( counter == 20 ) { LATJbits.LATJ0 = 1;   LATJbits.LATJ4 = 0; }
      else if ( counter == 40 ) {  LATJbits.LATJ0 = 0; LATJbits.LATJ4 = 1; counter = 0; } 
@@ -195,7 +201,7 @@ void main(void)
      switch ( state ) {
 
      case 0:
-     if ( ch == ':' ) { state = 1; b_line = 0; csum = 0;}
+     if ( ch == ':' ) { state = 1; fcom = 0; csum = 0;}
      else if ( ch == '#' ) { state = 9; }
      else {
          while ( PIR1bits.TX1IF == 0 );
@@ -248,36 +254,44 @@ void main(void)
      a = getbyte( ch ); 
      state = 8;
      break;
+     
+     
 
      case 8:
      b = getbyte( ch ); 
      com = a<<4 | b;
      csum += com;
      if ( com == 0 ) {
-         if( num ) state = 12; 
-         else state = 14;
-         if ( idx == 0 ) {
-         r_addr = addr_hi<<16 | addr;
-         //ptr_b = &c_buff[pi];
-         save_a = addr & 0xffc0;
-     }
-      curr_a = addr & 0xffc0;
-      if (save_a != curr_a ){
-         Nop();
+         if( num ) { state = 12; } else { state = 14; }
+         idx = a_lo & 0x3f;
+         
+       curr_a = addr & 0xffc0;
+       if ((save_a != curr_a) ){
+         if ( bf == 0 ){
+         n_addr = r_addr;    
          pi ^= 0x40;
+         fcom = 2;
+         }
+         save_a = curr_a; 
+         r_addr =  addr_hi * 65536;
+         r_addr += curr_a;
+         Nop();
+        
        }
-      // pi ^= 0x40;
-     
-         ptr_b = &c_buff[pi];
+       
+          ptr_b = &c_buff[pi];
          //buff = &c_buff[0];
-         buff = ptr_b;
+          buff = ptr_b;
      }else if ( com == 1 ) { 
          if ( num) { state = 12;
          buff = &r_buff[0];} 
          else state = 14;
      } else if ( com == 4 ) {
-         state = 12;
-         buff = &u_buff[0];
+         state = 21;
+         //buff = &u_buff[0];
+         //fcom = 2;
+         idy = 0;
+         //pi ^= 0x40;
      }
      else state = 0;
      break;
@@ -307,17 +321,25 @@ void main(void)
      data = a<<4 | b;
      buff[idx++] = data;
      csum += data;
-      if ( idx >= 64 ) {
-         Nop();
-         idx = 0;
-     } 
      num--;
      if ( num )
      {
+         if ( idx >= 64 ) {
+         Nop();
+         idx = 0;
+         pi ^= 0x40;
+         buff = &c_buff[pi];
+         fcom = 1;
+     } 
          state = 12;
      }
      else
      {
+         if ( idx >= 64 ) {
+         Nop();
+         idx = 0;
+     } 
+         bf = 0;
          state = 14;
      }
      break;
@@ -333,13 +355,21 @@ void main(void)
      if ( ((0xFF - csum + 1) == c ) || ( csum == 0 )) {
          tx_r = 0x06; 
          state = 16;
+         if ( com == 0 && idx == 0 ) {
+         pi ^= 0x40;
+         buff = &c_buff[pi];
+         fcom = 1;
+         }
          if ( com == 4 ) {
              a = u_buff[0];
              b = u_buff[1];
              addr_hi = a<<8 | b;
          }
      }
-     else { tx_r = 0x15;state = 18; }
+     else { tx_r = 0x15;
+     state = 18;
+     fcom = 3;
+     }
      break;
 
      case 16:
@@ -381,6 +411,27 @@ void main(void)
      state = 0;
      break;
      
+     
+     case 21:
+     a = getbyte( ch ); 
+     state = 22;
+     break;
+
+     case 22: 
+     b = getbyte( ch ); 
+     data = a<<4 | b;
+     u_buff[idy++] = data;
+     csum += data;
+     num--;
+     if ( num )
+     {
+         state = 21;
+     }
+     else
+     {
+         state = 14;
+     }
+     break;
 
      default:
      TXREG1 = 0x15;
@@ -390,14 +441,21 @@ void main(void)
      
    //  while ( PIR1bits.TX1IF == 0 );
      if ( end_line == 1 ) {
-         if ( ((idx == 0) && ( com == 0 ))  ) {
+         if ( fcom == 1  ) {
+             WriteBlockFlash(r_addr,1,&c_buff[pi ^ 0x40]);
+             for (i = idx; i < 64; i++) { buff[i] = 0xff; }
+             bf = 1;
+         } else if ( fcom == 2 ) {
              Nop();
-             Nop();
-             WriteBlockFlash(r_addr,1,ptr_b);
-         } else if ( com == 4 ) {
-             WriteBlockFlash(r_addr,1,ptr_b);
-             idx = 0;
+             WriteBlockFlash(n_addr,1,&c_buff[pi ^ 0x40]);
+             for (i = idx; i < 64; i++) { buff[i] = 0xff; }
+             //idx = 0;
+         }else if ( fcom == 3 ) {
+             tx_r  = 0x19;
+             idx -= num1;
          }
+         
+         fcom = 0;
          // WriteBytesFlash(r_addr, num1, c_buff); 
          end_line = 0;
          while ( PIR1bits.TX1IF == 0 );
@@ -409,7 +467,8 @@ void main(void)
       TXREG1 = tx_r;
       while ( PIR1bits.TX1IF == 0 );
       Nop();
-      idx = 0;
+      bf = 1;
+      save_a = 0;
       pi = 0;
       state = 0;
       com1 = 0;
@@ -599,4 +658,18 @@ void ReadFlash(unsigned long startaddr, unsigned int num_bytes, unsigned char *f
         // asm("TBLRDPOSTINC");
 	}	
 
+}
+
+
+
+void set_buffer( uint8_t *p)
+{
+    uint8_t i;
+    
+    i = 0;
+    
+    do {
+        *(p + i ) = 0xff;
+    } while ( ++i < 64 );
+    return;
 }
